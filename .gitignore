@@ -1,0 +1,29 @@
+# Binarios y compilados
+server
+client
+*.o
+*.a
+*.so
+*.out
+
+# Rust
+target/
+**/*.rs.bk
+Cargo.lock
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+
+# Logs del servidor (requerido por el proyecto)
+*.log
+logs/
+
+# IDEs y SO
+.vscode/
+.idea/
+.DS_Store
