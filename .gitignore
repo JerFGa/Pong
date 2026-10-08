@@ -1,6 +1,6 @@
-# Binarios y compilados
-server
-client
+# Binarios ejecutables en la raíz
+/server
+/client
 *.o
 *.a
 *.so
