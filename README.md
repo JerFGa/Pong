@@ -15,13 +15,21 @@ El sistema cuenta con un servidor autoritativo encargado de mantener el estado d
 ## 2. Desarrollo
 
 ### 2.1 Arquitectura del Sistema
-El sistema sigue una arquitectura **Cliente/Servidor Centralizado**:
-* **Servidor Autoritativo (`PongServer`):**
-  * Implementado utilizando la API nativa de **Berkeley Sockets**.
-  * Soporta concurrencia para $n$ parejas de jugadores simultáneas mediante programación multihilo (*threads*).
-  * Incluye un sistema de *logger* que registra peticiones entrantes, respuestas, información y errores tanto en terminal como en un archivo de log.
-* **Cliente (`PongClient`):**
-  * Responsable de la captura de interacción del usuario (teclas de movimiento) y la renderización visual del estado del juego recibido del servidor.
+El sistema se basa en una arquitectura **Cliente/Servidor Centralizado** con roles claramente delimitados. Para más detalle técnico, ver [docs/architecture.md](docs/architecture.md).
+
+#### Servidor: Arquitectura por Capas (Servidor Autoritativo)
+* **Capa de Red (`src/net`):** Implementada con la API nativa de **Berkeley Sockets** mediante `libc`.
+* **Capa de Protocolo (`src/protocol`):** Serialización y deserialización binaria de `MyAppGameProtocol`.
+* **Capa de Matchmaking (`src/game`):** Registro de usuarios y emparejamiento concurrente de $n$ partidas.
+* **Capa de Juego y Concurrencia (`src/game`):** Bucle de física autoritativa ejecutado en hilos independientes (`threads`).
+* **Capa Transversal:** Logger concurrente hacia consola y archivo de bitácora (`<Log File>`).
+
+#### Cliente: Patrón MVC (Model - View - Controller)
+* **Modelo (Model):** Almacena pasivamente las coordenadas y puntajes recibidos del servidor.
+* **Vista (View):** Renderizado gráfico en pantalla (paletas, pelota, marcador y pantallas de estado).
+* **Controlador (Controller):** Captura entradas de teclado del usuario y coordina la actualización del modelo.
+* **Servicio de Red (Network Service):** Conexión por socket y empaquetado binario de peticiones al servidor.
+
 
 ### 2.2 Elección del Protocolo de Transporte
 * **Protocolo seleccionado:** `SOCK_STREAM` (TCP) *(o justificación de TCP/UDP según diseño)*.
