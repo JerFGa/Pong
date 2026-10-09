@@ -1,35 +1,48 @@
-"""Modelo de datos del juego Pong."""
+"""Passive state, updated exclusively by the UI/controller thread."""
+from protocol import REGISTER_RESP, WAIT_MATCH, GAME_START, GAME_STATE, GAME_OVER
 
 class GameStateModel:
     def __init__(self):
-        self.paddle1_y = 250
-        self.paddle2_y = 250
-        self.ball_x = 400
-        self.ball_y = 300
-        self.score_p1 = 0
-        self.score_p2 = 0
-        self.role = None          # 1 para Jugador 1 (Izq), 2 para Jugador 2 (Der)
-        self.status = "CONNECTING"# "CONNECTING", "WAITING", "PLAYING", "GAME_OVER"
-        self.winner = None
-        self.status_message = "Conectando al servidor..."
+        self.paddle1_y = self.paddle2_y = 255
+        self.ball_x, self.ball_y = 394, 294
+        self.score_p1 = self.score_p2 = 0
+        self.role = self.player_id = self.winner = None
+        self.status = "REGISTER"
+        self.status_message = "Crea tu perfil y entra a la cancha."
 
-    def update_state(self, p1_y, p2_y, ball_x, ball_y, s1, s2):
-        self.paddle1_y = p1_y
-        self.paddle2_y = p2_y
-        self.ball_x = ball_x
-        self.ball_y = ball_y
-        self.score_p1 = s1
-        self.score_p2 = s2
-
-    def set_game_start(self, role):
-        self.role = role
-        self.status = "PLAYING"
-        self.status_message = f"¡Partida iniciada! Eres el Jugador {role}"
-
-    def set_game_over(self, winner):
-        self.status = "GAME_OVER"
-        self.winner = winner
-        if winner == self.role:
-            self.status_message = "¡VICTORIA! Has ganado la partida"
+    def apply(self, opcode, values):
+        if opcode == REGISTER_RESP and self.status == "CONNECTING":
+            status, self.player_id = values
+            if status:
+                self.fail({1: "Perfil inválido.", 2: "Ese apodo ya está jugando. Elige otro.",
+                           3: "El servidor está lleno. Inténtalo más tarde."}[status])
+            else:
+                self.status = "REGISTERED"
+                self.status_message = "Perfil aceptado. Buscando rival..."
+        elif opcode == WAIT_MATCH and self.status == "REGISTERED":
+            self.status = "WAITING"
+            self.status_message = "Esperando a otro jugador..."
+        elif opcode == GAME_START and self.status in ("REGISTERED", "WAITING"):
+            self.role = values[0]
+            self.status = "PLAYING"
+            self.status_message = f"Eres el jugador {self.role}"
+        elif opcode == GAME_STATE and self.status == "PLAYING":
+            (self.paddle1_y, self.paddle2_y, self.ball_x, self.ball_y,
+             self.score_p1, self.score_p2) = values
+        elif opcode == GAME_OVER and self.status == "PLAYING":
+            self.winner = values[0]
+            self.status = "GAME_OVER"
+            if self.winner == 0:
+                self.status_message = "Partida cancelada."
+            elif self.winner == self.role:
+                suffix = " Tu rival se desconectó." if max(self.score_p1, self.score_p2) < 5 else ""
+                self.status_message = "¡Victoria!" + suffix
+            else:
+                self.status_message = "Tu rival ganó esta partida."
         else:
-            self.status_message = "DERROTA. Tu rival ha ganado la partida"
+            raise ValueError("El servidor envió un mensaje fuera de secuencia")
+
+    def fail(self, message):
+        if self.status not in ("GAME_OVER", "ERROR"):
+            self.status = "ERROR"
+            self.status_message = message

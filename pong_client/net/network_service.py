@@ -1,120 +1,100 @@
+"""Only this service handles sockets. The UI consumes a thread-safe event queue."""
+import queue
 import socket
-import struct
 import threading
+import time
+from protocol import register_packet, move_packet, decode_header, decode_payload
+
 
 class NetworkService:
-    OP_REGISTER_REQ  = 0x01
-    OP_REGISTER_RESP = 0x02
-    OP_WAIT_MATCH    = 0x03
-    OP_GAME_START    = 0x04
-    OP_MOVE_INPUT    = 0x05
-    OP_GAME_STATE    = 0x06
-    OP_GAME_OVER     = 0x07
-
-    def __init__(self, host, port, model):
-        self.host = host
-        self.port = port
-        self.model = model
+    def __init__(self, host, port):
+        self.host, self.port = host, port
+        self.events = queue.Queue(maxsize=512)
         self.sock = None
-        self.running = False
         self.thread = None
+        self.cancelled = threading.Event()
 
-    def connect(self, nickname: str, email: str) -> bool:
-        try:
-            self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.sock.connect((self.host, self.port))
-            self.running = True
+    def connect(self, nickname, email):
+        packet = register_packet(nickname, email)
+        self.thread = threading.Thread(target=self._run, args=(packet,), daemon=True)
+        self.thread.start()
 
-            # Enviar petición de registro binaria
-            nick_bytes = nickname.encode("utf-8")
-            email_bytes = email.encode("utf-8")
-            payload = struct.pack(f"!B{len(nick_bytes)}sB{len(email_bytes)}s", 
-                                  len(nick_bytes), nick_bytes, 
-                                  len(email_bytes), email_bytes)
-            
-            header = struct.pack("!BH", self.OP_REGISTER_REQ, len(payload))
-            self.sock.sendall(header + payload)
+    def _publish(self, kind, value=None):
+        while not self.cancelled.is_set():
+            try:
+                self.events.put((kind, value), timeout=0.1)
+                return
+            except queue.Full:
+                continue
 
-            # Iniciar hilo de recepción
-            self.thread = threading.Thread(target=self._listen_loop, daemon=True)
-            self.thread.start()
-            return True
-        except Exception as e:
-            print(f"[NetworkService] Error al conectar: {e}")
-            self.model.status_message = f"Error al conectar con el servidor: {e}"
-            return False
-
-    def send_move(self, direction: int):
-        """direction: 0=quieto, 1=arriba, 2=abajo"""
-        if not self.running or not self.sock:
-            return
-        try:
-            header = struct.pack("!BH", self.OP_MOVE_INPUT, 1)
-            payload = struct.pack("!B", direction)
-            self.sock.sendall(header + payload)
-        except Exception as e:
-            print(f"[NetworkService] Error enviando movimiento: {e}")
-
-    def _recv_exact(self, n: int) -> bytes:
+    def _recv_exact(self, sock, length, deadline=None):
         data = bytearray()
-        while len(data) < n:
-            packet = self.sock.recv(n - len(data))
-            if not packet:
-                return None
-            data.extend(packet)
+        while len(data) < length:
+            if self.cancelled.is_set():
+                raise ConnectionAbortedError("Conexión cancelada")
+            if deadline is not None and time.monotonic() >= deadline:
+                raise TimeoutError("El servidor dejó una respuesta incompleta")
+            try:
+                chunk = sock.recv(length - len(data))
+            except socket.timeout:
+                continue
+            if not chunk:
+                raise EOFError("El servidor cerró la conexión")
+            data.extend(chunk)
         return bytes(data)
 
-    def _listen_loop(self):
-        while self.running:
-            try:
-                # 1. Leer cabecera de 3 bytes
-                header_bytes = self._recv_exact(3)
-                if not header_bytes:
+    def _run(self, packet):
+        sock = None
+        try:
+            sock = socket.create_connection((self.host, self.port), timeout=5)
+            if self.cancelled.is_set():
+                return
+            self.sock = sock
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            sock.settimeout(0.25)
+            sock.sendall(packet)
+            registered = False
+            playing = False
+            while not self.cancelled.is_set():
+                initial_deadline = time.monotonic() + 5 if playing else (None if registered else time.monotonic() + 7)
+                first = self._recv_exact(sock, 1, initial_deadline)
+                deadline = time.monotonic() + 5
+                header = first + self._recv_exact(sock, 2, deadline)
+                opcode, length = decode_header(header)
+                payload = self._recv_exact(sock, length, deadline)
+                self._publish("packet", (opcode, decode_payload(opcode, payload)))
+                if opcode == 2:
+                    registered = True
+                if opcode == 4:
+                    playing = True
+                if opcode == 7 or (opcode == 2 and payload[0] != 0):
                     break
+        except (OSError, EOFError, ValueError) as error:
+            self._publish("error", str(error))
+        finally:
+            if sock:
+                sock.close()
+            self.sock = None
+            self._publish("closed")
 
-                opcode, length = struct.unpack("!BH", header_bytes)
-
-                # 2. Leer payload si existe
-                payload = b""
-                if length > 0:
-                    payload = self._recv_exact(length)
-                    if not payload:
-                        break
-
-                # 3. Procesar según OpCode
-                if opcode == self.OP_REGISTER_RESP:
-                    status, player_id = struct.unpack("!BB", payload)
-                    print(f"[Network] Registro confirmado. ID={player_id}, Status={status}")
-
-                elif opcode == self.OP_WAIT_MATCH:
-                    self.model.status = "WAITING"
-                    self.model.status_message = "En cola: Esperando a que se conecte tu rival..."
-
-                elif opcode == self.OP_GAME_START:
-                    role, = struct.unpack("!B", payload)
-                    self.model.set_game_start(role)
-                    print(f"[Network] Partida iniciada como Jugador {role}")
-
-                elif opcode == self.OP_GAME_STATE:
-                    p1_y, p2_y, bx, by, s1, s2 = struct.unpack("!HHHHBB", payload)
-                    self.model.update_state(p1_y, p2_y, bx, by, s1, s2)
-
-                elif opcode == self.OP_GAME_OVER:
-                    winner, = struct.unpack("!B", payload)
-                    self.model.set_game_over(winner)
-                    print(f"[Network] Fin de partida. Ganador: Jugador {winner}")
-
-            except Exception as e:
-                print(f"[NetworkService] Error en bucle de red: {e}")
-                break
-
-        self.running = False
-        print("[NetworkService] Conexión cerrada.")
+    def send_move(self, direction):
+        sock = self.sock
+        if sock and not self.cancelled.is_set():
+            try:
+                sock.sendall(move_packet(direction))
+            except OSError as error:
+                self.close()
+                return str(error)
+        return None
 
     def close(self):
-        self.running = False
-        if self.sock:
+        self.cancelled.set()
+        sock = self.sock
+        if sock:
             try:
-                self.sock.close()
-            except:
+                sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
                 pass
+            sock.close()
+        if self.thread and self.thread is not threading.current_thread():
+            self.thread.join(timeout=0.3)

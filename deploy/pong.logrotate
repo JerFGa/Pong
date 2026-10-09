@@ -1,0 +1,10 @@
+/var/log/pong/server.log {
+    daily
+    maxsize 20M
+    rotate 7
+    compress
+    missingok
+    notifempty
+    copytruncate
+    su pong pong
+}

@@ -9,7 +9,6 @@
 # Rust
 target/
 **/*.rs.bk
-Cargo.lock
 
 # Python
 __pycache__/
@@ -27,3 +26,8 @@ logs/
 .vscode/
 .idea/
 .DS_Store
+
+# Local test artifacts
+test-results/
+.coverage
+/server.exe

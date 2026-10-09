@@ -1,14 +1,14 @@
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OpCode {
-    RegisterReq  = 0x01,
+    RegisterReq = 0x01,
     RegisterResp = 0x02,
-    WaitMatch    = 0x03,
-    GameStart    = 0x04,
-    MoveInput    = 0x05,
-    GameState    = 0x06,
-    GameOver     = 0x07,
-    Unknown      = 0xFF,
+    WaitMatch = 0x03,
+    GameStart = 0x04,
+    MoveInput = 0x05,
+    GameState = 0x06,
+    GameOver = 0x07,
+    Unknown = 0xFF,
 }
 
 impl From<u8> for OpCode {
@@ -21,26 +21,16 @@ impl From<u8> for OpCode {
             0x05 => OpCode::MoveInput,
             0x06 => OpCode::GameState,
             0x07 => OpCode::GameOver,
-            _    => OpCode::Unknown,
+            _ => OpCode::Unknown,
         }
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Direction {
     Still = 0,
     Up = 1,
     Down = 2,
-}
-
-impl From<u8> for Direction {
-    fn from(val: u8) -> Self {
-        match val {
-            1 => Direction::Up,
-            2 => Direction::Down,
-            _ => Direction::Still,
-        }
-    }
 }
 
 /// Estado empaquetado del juego a retransmitir (10 bytes de payload)

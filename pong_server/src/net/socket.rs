@@ -1,142 +1,235 @@
-use libc::*;
+//! Linux Berkeley sockets. Descriptors never escape this module.
+use std::io;
 use std::mem;
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+use std::time::{Duration, Instant};
 
-/// Socket en modo servidor (Escucha conexiones usando Berkeley API)
-pub struct BerkeleyListener {
-    fd: c_int,
+pub struct BerkeleyListener(OwnedFd);
+pub struct BerkeleyStream(OwnedFd);
+
+fn last_error() -> io::Error {
+    io::Error::last_os_error()
 }
-
-/// Socket de conexión bidireccional con un cliente
-pub struct BerkeleyStream {
-    pub fd: c_int,
+fn wait(fd: i32, events: i16, deadline: Option<Instant>) -> io::Result<()> {
+    loop {
+        let timeout = match deadline {
+            Some(end) => end
+                .checked_duration_since(Instant::now())
+                .ok_or_else(|| io::Error::new(io::ErrorKind::TimedOut, "plazo de socket agotado"))?
+                .as_millis()
+                .clamp(1, i32::MAX as u128) as i32,
+            None => -1,
+        };
+        let mut pfd = libc::pollfd {
+            fd,
+            events,
+            revents: 0,
+        };
+        // SAFETY: pfd is valid for one element during poll.
+        let result = unsafe { libc::poll(&mut pfd, 1, timeout) };
+        if result > 0 {
+            if pfd.revents & libc::POLLNVAL != 0 {
+                return Err(io::Error::other("descriptor inválido"));
+            }
+            return Ok(()); // recv/send report EOF and errors, including POLLHUP.
+        }
+        if result == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "plazo de socket agotado",
+            ));
+        }
+        let error = last_error();
+        if error.kind() != io::ErrorKind::Interrupted {
+            return Err(error);
+        }
+    }
 }
-
 impl BerkeleyListener {
-    pub fn bind(port: u16) -> Result<Self, String> {
-        unsafe {
-            // 1. Crear socket
-            let fd = socket(AF_INET, SOCK_STREAM, 0);
-            if fd < 0 {
-                return Err("Fallo al crear socket con la API de Berkeley".to_string());
-            }
-
-            // SO_REUSEADDR para poder reiniciar el servidor rápidamente
-            let opt: c_int = 1;
-            setsockopt(
-                fd,
-                SOL_SOCKET,
-                SO_REUSEADDR,
-                &opt as *const _ as *const c_void,
-                mem::size_of_val(&opt) as socklen_t,
-            );
-
-            // 2. Configurar sockaddr_in
-            let mut addr: sockaddr_in = mem::zeroed();
-            addr.sin_family = AF_INET as sa_family_t;
-            addr.sin_addr.s_addr = INADDR_ANY.to_be();
-            addr.sin_port = port.to_be();
-
-            // 3. Enlazar (bind)
-            if bind(
-                fd,
-                &addr as *const _ as *const sockaddr,
-                mem::size_of::<sockaddr_in>() as socklen_t,
-            ) < 0
-            {
-                close(fd);
-                return Err(format!("Fallo al asociar el puerto {} (bind)", port));
-            }
-
-            // 4. Escuchar (listen)
-            if listen(fd, 32) < 0 {
-                close(fd);
-                return Err("Fallo al poner el socket en modo listen".to_string());
-            }
-
-            Ok(Self { fd })
+    pub fn bind(port: u16) -> io::Result<Self> {
+        // SAFETY: socket returns a new descriptor, owned exactly once below.
+        let raw = unsafe {
+            libc::socket(
+                libc::AF_INET,
+                libc::SOCK_STREAM | libc::SOCK_CLOEXEC | libc::SOCK_NONBLOCK,
+                0,
+            )
+        };
+        if raw < 0 {
+            return Err(last_error());
         }
+        let fd = unsafe { OwnedFd::from_raw_fd(raw) };
+        let one: libc::c_int = 1;
+        let result = unsafe {
+            libc::setsockopt(
+                raw,
+                libc::SOL_SOCKET,
+                libc::SO_REUSEADDR,
+                &one as *const _ as *const libc::c_void,
+                mem::size_of_val(&one) as libc::socklen_t,
+            )
+        };
+        if result < 0 {
+            return Err(last_error());
+        }
+        let mut address: libc::sockaddr_in = unsafe { mem::zeroed() };
+        address.sin_family = libc::AF_INET as libc::sa_family_t;
+        address.sin_port = port.to_be();
+        address.sin_addr.s_addr = libc::INADDR_ANY;
+        let result = unsafe {
+            libc::bind(
+                raw,
+                &address as *const _ as *const libc::sockaddr,
+                mem::size_of_val(&address) as libc::socklen_t,
+            )
+        };
+        if result < 0 {
+            return Err(last_error());
+        }
+        if unsafe { libc::listen(raw, 128) } < 0 {
+            return Err(last_error());
+        }
+        Ok(Self(fd))
     }
-
-    pub fn accept(&self) -> Result<(BerkeleyStream, String), String> {
-        unsafe {
-            let mut client_addr: sockaddr_in = mem::zeroed();
-            let mut addr_len = mem::size_of::<sockaddr_in>() as socklen_t;
-
-            let client_fd = accept(
-                self.fd,
-                &mut client_addr as *mut _ as *mut sockaddr,
-                &mut addr_len,
-            );
-
-            if client_fd < 0 {
-                return Err("Error al aceptar conexión entrante".to_string());
-            }
-
-            // Obtener IP del cliente en texto para el log
-            let ip_bytes = client_addr.sin_addr.s_addr.to_ne_bytes();
-            let ip_str = format!("{}.{}.{}.{}", ip_bytes[0], ip_bytes[1], ip_bytes[2], ip_bytes[3]);
-
-            Ok((BerkeleyStream { fd: client_fd }, ip_str))
+    pub fn accept(&self) -> io::Result<Option<(BerkeleyStream, String)>> {
+        match wait(
+            self.0.as_raw_fd(),
+            libc::POLLIN,
+            Some(Instant::now() + Duration::from_millis(200)),
+        ) {
+            Err(e) if e.kind() == io::ErrorKind::TimedOut => return Ok(None),
+            result => result?,
         }
+        let mut address: libc::sockaddr_in = unsafe { mem::zeroed() };
+        let mut length = mem::size_of_val(&address) as libc::socklen_t;
+        let raw = unsafe {
+            libc::accept4(
+                self.0.as_raw_fd(),
+                &mut address as *mut _ as *mut libc::sockaddr,
+                &mut length,
+                libc::SOCK_CLOEXEC | libc::SOCK_NONBLOCK,
+            )
+        };
+        if raw < 0 {
+            let error = last_error();
+            return if matches!(
+                error.kind(),
+                io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted
+            ) {
+                Ok(None)
+            } else {
+                Err(error)
+            };
+        }
+        let fd = unsafe { OwnedFd::from_raw_fd(raw) };
+        let one: libc::c_int = 1;
+        let result = unsafe {
+            libc::setsockopt(
+                raw,
+                libc::IPPROTO_TCP,
+                libc::TCP_NODELAY,
+                &one as *const _ as *const libc::c_void,
+                mem::size_of_val(&one) as libc::socklen_t,
+            )
+        };
+        if result < 0 {
+            return Err(last_error());
+        }
+        let ip = std::net::Ipv4Addr::from(address.sin_addr.s_addr.to_ne_bytes());
+        // Bound dead-peer detection, including idle players in the lobby.
+        for (level, option, value) in [
+            (libc::SOL_SOCKET, libc::SO_KEEPALIVE, 1_i32),
+            (libc::SOL_SOCKET, libc::SO_SNDBUF, 8192),
+            (libc::IPPROTO_TCP, libc::TCP_KEEPIDLE, 30),
+            (libc::IPPROTO_TCP, libc::TCP_KEEPINTVL, 10),
+            (libc::IPPROTO_TCP, libc::TCP_KEEPCNT, 3),
+            (libc::IPPROTO_TCP, libc::TCP_USER_TIMEOUT, 10000),
+        ] {
+            let result = unsafe {
+                libc::setsockopt(
+                    raw,
+                    level,
+                    option,
+                    &value as *const _ as *const libc::c_void,
+                    mem::size_of_val(&value) as libc::socklen_t,
+                )
+            };
+            if result < 0 {
+                return Err(last_error());
+            }
+        }
+        Ok(Some((
+            BerkeleyStream(fd),
+            format!("{}:{}", ip, u16::from_be(address.sin_port)),
+        )))
     }
 }
-
 impl BerkeleyStream {
-    pub fn send_all(&self, data: &[u8]) -> Result<(), String> {
-        let mut total_sent = 0;
-        while total_sent < data.len() {
-            let sent = unsafe {
-                send(
-                    self.fd,
-                    data[total_sent..].as_ptr() as *const c_void,
-                    data.len() - total_sent,
-                    0,
-                )
-            };
-            if sent < 0 {
-                return Err("Error de socket al enviar datos".to_string());
-            }
-            total_sent += sent as usize;
-        }
-        Ok(())
-    }
-
-    pub fn recv_exact(&self, buf: &mut [u8]) -> Result<(), String> {
-        let mut total_read = 0;
-        while total_read < buf.len() {
+    /// Bounded full write. The application assigns one writer per connection.
+    pub fn send_all(&self, data: &[u8]) -> io::Result<()> {
+        let deadline = Some(Instant::now() + Duration::from_secs(2));
+        let mut offset = 0;
+        while offset < data.len() {
+            wait(self.0.as_raw_fd(), libc::POLLOUT, deadline)?;
             let n = unsafe {
-                recv(
-                    self.fd,
-                    buf[total_read..].as_mut_ptr() as *mut c_void,
-                    buf.len() - total_read,
-                    0,
+                libc::send(
+                    self.0.as_raw_fd(),
+                    data[offset..].as_ptr().cast(),
+                    data.len() - offset,
+                    libc::MSG_NOSIGNAL | libc::MSG_DONTWAIT,
                 )
             };
-            if n <= 0 {
-                return Err("Conexión cerrada por el cliente o error de lectura".to_string());
+            if n > 0 {
+                offset += n as usize;
+            } else if n == 0 {
+                return Err(io::Error::new(io::ErrorKind::WriteZero, "envío vacío"));
+            } else {
+                let error = last_error();
+                if !matches!(
+                    error.kind(),
+                    io::ErrorKind::Interrupted | io::ErrorKind::WouldBlock
+                ) {
+                    return Err(error);
+                }
             }
-            total_read += n as usize;
         }
         Ok(())
     }
-}
-
-impl Drop for BerkeleyListener {
-    fn drop(&mut self) {
-        unsafe {
-            if self.fd >= 0 {
-                close(self.fd);
+    pub fn recv_exact(&self, data: &mut [u8], deadline: Option<Instant>) -> io::Result<()> {
+        let mut offset = 0;
+        while offset < data.len() {
+            wait(self.0.as_raw_fd(), libc::POLLIN, deadline)?;
+            let n = unsafe {
+                libc::recv(
+                    self.0.as_raw_fd(),
+                    data[offset..].as_mut_ptr().cast(),
+                    data.len() - offset,
+                    libc::MSG_DONTWAIT,
+                )
+            };
+            if n > 0 {
+                offset += n as usize;
+            } else if n == 0 {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "cliente desconectado",
+                ));
+            } else {
+                let error = last_error();
+                if !matches!(
+                    error.kind(),
+                    io::ErrorKind::Interrupted | io::ErrorKind::WouldBlock
+                ) {
+                    return Err(error);
+                }
             }
         }
+        Ok(())
     }
-}
-
-impl Drop for BerkeleyStream {
-    fn drop(&mut self) {
+    pub fn shutdown(&self) {
+        // Wakes readers; OwnedFd closes only when the last owning Arc is dropped.
         unsafe {
-            if self.fd >= 0 {
-                close(self.fd);
-            }
+            libc::shutdown(self.0.as_raw_fd(), libc::SHUT_RDWR);
         }
     }
 }

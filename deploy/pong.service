@@ -1,0 +1,23 @@
+[Unit]
+Description=Pong authoritative Rust server
+After=network.target
+
+[Service]
+Type=simple
+User=pong
+Group=pong
+WorkingDirectory=/opt/pong
+ExecStart=/opt/pong/server 8080 /var/log/pong/server.log
+Restart=on-failure
+RestartSec=3
+KillSignal=SIGTERM
+TimeoutStopSec=10
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log/pong
+LimitNOFILE=4096
+
+[Install]
+WantedBy=multi-user.target
