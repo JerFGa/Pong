@@ -17,11 +17,14 @@ impl Room {
         ));
         for (index, player) in players.iter().enumerate() {
             player.phase.store(PLAYING, Ordering::SeqCst);
-            if player
+            if let Err(error) = player
                 .stream
                 .send_all(&Codec::encode_game_start(index as u8 + 1))
-                .is_err()
             {
+                Logger::error(&format!(
+                    "sala={id} id={} GAME_START: {error}",
+                    player.reservation.id
+                ));
                 player.disconnect();
             } else {
                 Logger::response(&format!(
@@ -66,7 +69,11 @@ impl Room {
             let payload = state.to_payload();
             let bytes = Codec::encode_game_state(&payload);
             for player in players {
-                if player.stream.send_all(&bytes).is_err() {
+                if let Err(error) = player.stream.send_all(&bytes) {
+                    Logger::error(&format!(
+                        "sala={id} id={} GAME_STATE: {error}",
+                        player.reservation.id
+                    ));
                     player.disconnect();
                 } else {
                     Logger::response(&format!(
@@ -93,16 +100,17 @@ impl Room {
         };
         for player in players {
             player.phase.store(FINISHED, Ordering::SeqCst);
-            if player.is_connected()
-                && player
-                    .stream
-                    .send_all(&Codec::encode_game_over(winner))
-                    .is_ok()
-            {
-                Logger::response(&format!(
-                    "sala={id} id={} GAME_OVER ganador={winner}",
-                    player.reservation.id
-                ));
+            if player.is_connected() {
+                match player.stream.send_all(&Codec::encode_game_over(winner)) {
+                    Ok(()) => Logger::response(&format!(
+                        "sala={id} id={} GAME_OVER ganador={winner}",
+                        player.reservation.id
+                    )),
+                    Err(error) => Logger::error(&format!(
+                        "sala={id} id={} GAME_OVER: {error}",
+                        player.reservation.id
+                    )),
+                }
             }
             player.disconnect();
         }

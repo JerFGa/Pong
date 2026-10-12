@@ -2,7 +2,9 @@
 
 **Internet: Arquitectura y Protocolos · Universidad EAFIT**
 Servidor Rust con sockets Berkeley/Linux y cliente gráfico Python/Pygame.
-**Rama de trabajo: Development** (D mayúscula).
+Esta entrega reúne la implementación completa de `Development` y las correcciones
+adicionales de verificación. Conserva el cliente, servidor, protocolo y funciones
+del juego. Inicio rápido: [INICIO_RAPIDO.md](INICIO_RAPIDO.md).
 
 ## 1. Introducción
 
@@ -215,10 +217,9 @@ python3 -m venv .venv
 
 ### 2.6 Compilación y ejecución
 
-Desde la raíz, en `Development`:
+Desde la raíz del proyecto extraído o del repositorio:
 
 ```bash
-git branch --show-current
 make
 ./server 8080 server.log
 ```
@@ -281,8 +282,9 @@ En Windows:
 ```
 
 Cobertura y resultados: [docs/testing.md](docs/testing.md).
-GitHub Actions verifica pushes y pull requests hacia `Development`. El flujo
-queda configurado localmente y se ejecutará al subir los cambios.
+GitHub Actions verifica pushes y pull requests hacia `main` y `Development`.
+También admite ejecución manual y guarda las capturas de las pruebas de interfaz.
+El flujo se ejecutará al subir estos archivos al repositorio.
 
 ### 2.8 AWS Academy
 
@@ -290,6 +292,25 @@ queda configurado localmente y se ejecutará al subir los cambios.
 de seguridad, compilación, servicio systemd, bitácora, prueba externa y parada.
 Se incluyen `deploy/pong.service` y `deploy/pong.logrotate`.
 **El despliegue AWS sigue pendiente:** todavía no hay instancia de Academy.
+
+### 2.9 Organización y entrega
+
+El equipo debe tener dos o tres integrantes. Registra sus nombres reales y sus
+responsabilidades en [docs/equipo.md](docs/equipo.md) antes de entregar.
+Los campos están pendientes porque los nombres no se proporcionaron.
+
+El repositorio debe ser privado. Su propietario debe cambiar la visibilidad en
+GitHub y habilitar el acceso del profesor según el mecanismo acordado. Estos
+ajustes de cuenta no se sustituyen con archivos incluidos en el ZIP.
+
+Publica esta versión en la rama que se entregará; se recomienda integrar en `main`
+para que el enlace general abra la versión completa. La entrega en Interactiva es
+el 22 de octubre de 2026 a las 23:59. No se permiten commits posteriores al cierre.
+
+El enunciado permite C/Rust, pero contiene otra nota que menciona únicamente C.
+Esta versión conserva Rust y la API Berkeley directa mediante `libc`. Sus tipos
+administran descriptores; no usan bibliotecas de sockets de alto nivel. Confirma
+con el profesor la interpretación de la nota sobre lenguaje y clases de sockets.
 
 ## 3. Conclusiones
 

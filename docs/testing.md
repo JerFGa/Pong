@@ -1,12 +1,12 @@
 # Verificación del proyecto
 
-Fecha de ejecución local: **8 de octubre de 2026**.
+Fecha de ejecución de esta entrega: **12 de octubre de 2026**.
 
 ## Entorno observado
 
-- Servidor: Ubuntu 22.04.5 en WSL2, x86_64, Rust/Cargo 1.99.0.
-- Cliente y renderizado: Windows, Python 3.13, Pygame 2.6.1.
-- Protocolo e integración: Python 3 de Ubuntu, sockets TCP reales en loopback.
+- Servidor: Linux 6.18.44, x86_64, Rust/Cargo 1.99.0.
+- Cliente y renderizado: Linux, Python 3.12.14, Pygame 2.6.1 y SDL sin ventana.
+- Protocolo e integración: sockets TCP reales en loopback contra el servidor compilado.
 - Compilación release con `Cargo.lock`; transporte `libc` 0.2.190.
 
 ## Resultados
@@ -18,11 +18,14 @@ Fecha de ejecución local: **8 de octubre de 2026**.
 | Compilación release mediante `make` | Correcta |
 | Pruebas unitarias Rust | 7/7 |
 | Pruebas del cliente y protocolo Python | 6/6 |
-| Integración TCP con el ejecutable Rust | 14/14 |
+| Integración TCP con el ejecutable Rust | 16/16 |
 | Interfaz Pygame con SDL sin ventana | 2/2 |
 
-**Total: 29 pruebas automatizadas satisfactorias.**
-Las seis pruebas Python también se ejecutaron en Windows.
+**Total: 31 pruebas automatizadas satisfactorias; cero fallos.**
+La integración completa tardó 36,799 segundos. Se ejecutaron los comandos
+`make check`, `make test` y `make test-ui` sobre el código incluido en este ZIP.
+Se usó `CARGO=/root/.cargo/bin/cargo` en este entorno para localizar Cargo.
+No se ha repetido esta verificación en Windows; los scripts PowerShell se conservan.
 
 ## Qué se probó
 
@@ -36,6 +39,9 @@ Las seis pruebas Python también se ejecutaron en Windows.
   ganador y marcador final antes del cierre.
 - Dos salas simultáneas: mover/desconectar en una no altera la otra.
 - Salida de un jugador en espera y emparejamiento posterior.
+- Desconexión del segundo jugador, victoria del primero y nuevo registro con
+  los mismos apodos después de liberar la sala.
+- Movimiento incompleto que agota su plazo sin afectar otra partida activa.
 - Apodo duplicado sin expulsar al jugador que ya esperaba.
 - Movimiento inválido y desconexión: victoria del rival conectado.
 - Rechazo de movimientos antes del inicio y del exceso de 240 mensajes/s.
@@ -49,8 +55,9 @@ Las seis pruebas Python también se ejecutaron en Windows.
 - Renderizado de registro, conexión, espera, cancha, resultado y error.
 
 Se inspeccionaron visualmente las imágenes de registro, cancha y error generadas
-por `test_ui.py`, sin recortes ni superposiciones observados. Las imágenes quedan
-en `test-results/ui/` y no se versionan.
+por `test_ui.py`, sin recortes ni superposiciones observados. Las seis imágenes
+de esta verificación están incluidas en `evidencias/ui/`. Al repetir las pruebas,
+las imágenes nuevas se generan en `test-results/ui/`.
 
 ## Repetir las comprobaciones
 

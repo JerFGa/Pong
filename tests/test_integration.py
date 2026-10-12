@@ -160,6 +160,24 @@ class ServerTests(unittest.TestCase):
         a.sendall(frame(5, b"\x03"))
         self.assertEqual(until(b, 7), b"\x02")
 
+    def test_second_player_disconnect_and_players_can_register_again(self):
+        a, b = self.pair()
+        b.close()
+        self.assertEqual(until(a, 7), b"\x01")
+        # Closing the room must release names and descriptors, not only report a win.
+        a.close()
+        time.sleep(0.1)
+        self.pair()
+
+    def test_partial_movement_timeout_preserves_other_rooms(self):
+        a, b = self.pair("Slow", "Opponent")
+        c, d = self.pair("Other1", "Other2")
+        a.sendall(b"\x05\x00")
+        self.assertEqual(until(b, 7, timeout=7), b"\x02")
+        self.assertEqual(len(until(c, 6)), 10)
+        self.assertEqual(len(until(d, 6)), 10)
+        self.assertIn("lectura:", self.log.read_text())
+
     def test_input_outside_match_is_rejected(self):
         a = self.register("Waiting")
         until(a, 3)

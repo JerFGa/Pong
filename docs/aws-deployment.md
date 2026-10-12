@@ -42,9 +42,10 @@ sh /tmp/rustup-init.sh -y --profile minimal --component rustfmt --component clip
 source "$HOME/.cargo/env"
 ```
 
-## 3. Obtener exclusivamente Development
+## 3. Obtener la versión que se entregará
 
-Si los cambios ya están subidos a GitHub:
+Si los cambios completos ya están subidos a `Development`, conserva este comando.
+Si integraste esta entrega en `main`, sustituye `Development` por `main`:
 
 ```bash
 git clone --branch Development --single-branch https://github.com/JerFGa/Pong.git
@@ -59,6 +60,11 @@ SSH con una clave de despliegue de solo lectura. No incluyas tokens en comandos
 que queden guardados en el historial. Si los cambios solo están en tu PC, súbelos
 a `Development` antes de clonar o transfiere una copia del proyecto sin `.git`,
 `.venv`, `target`, logs ni credenciales mediante SCP.
+
+También puedes transferir y extraer el ZIP corregido en la instancia sin usar Git.
+En ese caso entra a la carpeta `Pong_Corregido` extraída y ejecuta `make check`,
+`make test` y los comandos de instalación siguientes. El ZIP no contiene tokens
+ni claves y el binario se genera en la propia instancia.
 
 Prueba inicial en primer plano:
 
@@ -110,7 +116,7 @@ sudo systemctl start pong
 
 ## 5. Verificación y evidencia de entrega
 
-- `git branch --show-current` muestra `Development`.
+- Si usas Git, `git branch --show-current` muestra la rama con la versión completa.
 - `make check` y `make test` terminan sin errores.
 - `systemctl status pong` indica servicio activo.
 - `ss -ltn` muestra el puerto 8080 en escucha.
