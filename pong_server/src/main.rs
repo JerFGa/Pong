@@ -62,6 +62,21 @@ fn reap(handles: &mut Vec<JoinHandle<()>>) {
         }
     }
 }
+// Log a reply only after a complete write; failed replies are recorded as errors.
+fn registration_response(stream: &BerkeleyStream, status: u8, id: u8) -> Result<(), String> {
+    let result = stream.send_all(&Codec::encode_register_resp(status, id));
+    match result {
+        Ok(()) => {
+            Logger::response(&format!("REGISTER_RESP estado={status} id={id}"));
+            Ok(())
+        }
+        Err(error) => {
+            let message = format!("REGISTER_RESP estado={status} id={id}: {error}");
+            Logger::error(&message);
+            Err(message)
+        }
+    }
+}
 fn session(stream: Arc<BerkeleyStream>, reservation: Reservation, lobby: Arc<Lobby>) {
     let id = reservation.id;
     let registration = Codec::read_request(&stream, true)
@@ -70,8 +85,7 @@ fn session(stream: Arc<BerkeleyStream>, reservation: Reservation, lobby: Arc<Lob
         Ok(profile) => profile,
         Err(error) => {
             Logger::error(&format!("id={id} registro rechazado: {error}"));
-            let _ = stream.send_all(&Codec::encode_register_resp(1, 0));
-            Logger::response(&format!("id={id} REGISTER_RESP estado=1"));
+            let _ = registration_response(&stream, 1, 0);
             stream.shutdown();
             return;
         }
@@ -80,19 +94,15 @@ fn session(stream: Arc<BerkeleyStream>, reservation: Reservation, lobby: Arc<Lob
         "id={id} REGISTER_REQ nickname={nick} email={email}"
     ));
     if !reservation.set_name(&nick) {
-        let _ = stream.send_all(&Codec::encode_register_resp(2, 0));
-        Logger::response(&format!("id={id} REGISTER_RESP estado=2 nickname ocupado"));
+        Logger::error(&format!("id={id} nickname ocupado"));
+        let _ = registration_response(&stream, 2, 0);
         stream.shutdown();
         return;
     }
-    if stream
-        .send_all(&Codec::encode_register_resp(0, id))
-        .is_err()
-    {
+    if registration_response(&stream, 0, id).is_err() {
         stream.shutdown();
         return;
     }
-    Logger::response(&format!("id={id} REGISTER_RESP estado=0"));
     let player = Arc::new(Player::new(reservation, nick, stream));
     if let Err(error) = lobby.join(&player) {
         Logger::error(&format!("id={id} emparejamiento: {error}"));
@@ -170,8 +180,8 @@ fn run() -> Result<(), String> {
                     let lobby = Arc::clone(&lobby);
                     sessions.push(thread::spawn(move || session(stream, reservation, lobby)));
                 } else {
-                    let _ = stream.send_all(&Codec::encode_register_resp(3, 0));
-                    Logger::response("REGISTER_RESP estado=3 servidor lleno");
+                    Logger::error("registro rechazado: servidor lleno");
+                    let _ = registration_response(&stream, 3, 0);
                     stream.shutdown();
                 }
             }
