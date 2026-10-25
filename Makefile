@@ -9,7 +9,7 @@ all: build
 build:
 	@echo "Compilando PongServer..."
 	$(CARGO) build --release --manifest-path $(SERVER_DIR)/Cargo.toml
-	cp $(SERVER_DIR)/target/release/pong_server ./$(TARGET)
+	cp --remove-destination $(SERVER_DIR)/target/release/pong_server ./$(TARGET)
 	@echo "Binario generado exitosamente en ./$(TARGET)"
 
 clean:

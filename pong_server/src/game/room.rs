@@ -59,7 +59,7 @@ impl Room {
                             Direction::Still => 0,
                         };
                         if let Ok(mut g) = state_p1.lock() {
-                            g.move_paddle(1, dir_val);
+                            g.set_paddle_direction(1, dir_val);
                         }
                     }
                 }
@@ -96,7 +96,7 @@ impl Room {
                             Direction::Still => 0,
                         };
                         if let Ok(mut g) = state_p2.lock() {
-                            g.move_paddle(2, dir_val);
+                            g.set_paddle_direction(2, dir_val);
                         }
                     }
                 }
