@@ -11,6 +11,29 @@ use std::time::Duration;
 pub struct Room;
 
 impl Room {
+    // TCP puede entregar los datos por partes: leer hasta llenar el buffer.
+    fn recv_exact(fd: libc::c_int, buffer: &mut [u8]) -> bool {
+        let mut received = 0;
+        while received < buffer.len() {
+            let n = unsafe {
+                libc::recv(
+                    fd,
+                    buffer[received..].as_mut_ptr() as *mut libc::c_void,
+                    buffer.len() - received,
+                    0,
+                )
+            };
+            if n < 0 && std::io::Error::last_os_error().kind() == std::io::ErrorKind::Interrupted {
+                continue;
+            }
+            if n <= 0 {
+                return false; // Conexión cerrada o error de lectura.
+            }
+            received += n as usize;
+        }
+        true
+    }
+
     pub fn start_match(p1: Player, p2: Player) {
         thread::spawn(move || {
             let room_name = format!("Sala-[{} vs {}]", p1.nickname, p2.nickname);
@@ -38,17 +61,19 @@ impl Room {
             thread::spawn(move || {
                 let mut header_buf = [0u8; 3];
                 while is_running_p1.load(Ordering::Relaxed) {
-                    let n = unsafe {
-                        libc::recv(p1_fd, header_buf.as_mut_ptr() as *mut libc::c_void, 3, 0)
-                    };
-                    if n <= 0 { break; }
+                    if !Self::recv_exact(p1_fd, &mut header_buf) {
+                        break;
+                    }
 
                     let (opcode, len) = Codec::decode_header(&header_buf);
-                    let mut payload = vec![0u8; len as usize];
-                    if len > 0 {
-                        let _ = unsafe {
-                            libc::recv(p1_fd, payload.as_mut_ptr() as *mut libc::c_void, len as usize, 0)
-                        };
+                    // En la partida sólo se recibe MOVE_INPUT con un byte de dirección.
+                    if opcode != OpCode::MoveInput || len != 1 {
+                        Logger::error("Trama de movimiento inválida");
+                        break;
+                    }
+                    let mut payload = [0u8; 1];
+                    if !Self::recv_exact(p1_fd, &mut payload) {
+                        break;
                     }
 
                     if opcode == OpCode::MoveInput {
@@ -59,7 +84,7 @@ impl Room {
                             Direction::Still => 0,
                         };
                         if let Ok(mut g) = state_p1.lock() {
-                            g.move_paddle(1, dir_val);
+                            g.set_paddle_direction(1, dir_val);
                         }
                     }
                 }
@@ -75,17 +100,19 @@ impl Room {
             thread::spawn(move || {
                 let mut header_buf = [0u8; 3];
                 while is_running_p2.load(Ordering::Relaxed) {
-                    let n = unsafe {
-                        libc::recv(p2_fd, header_buf.as_mut_ptr() as *mut libc::c_void, 3, 0)
-                    };
-                    if n <= 0 { break; }
+                    if !Self::recv_exact(p2_fd, &mut header_buf) {
+                        break;
+                    }
 
                     let (opcode, len) = Codec::decode_header(&header_buf);
-                    let mut payload = vec![0u8; len as usize];
-                    if len > 0 {
-                        let _ = unsafe {
-                            libc::recv(p2_fd, payload.as_mut_ptr() as *mut libc::c_void, len as usize, 0)
-                        };
+                    // En la partida sólo se recibe MOVE_INPUT con un byte de dirección.
+                    if opcode != OpCode::MoveInput || len != 1 {
+                        Logger::error("Trama de movimiento inválida");
+                        break;
+                    }
+                    let mut payload = [0u8; 1];
+                    if !Self::recv_exact(p2_fd, &mut payload) {
+                        break;
                     }
 
                     if opcode == OpCode::MoveInput {
@@ -96,7 +123,7 @@ impl Room {
                             Direction::Still => 0,
                         };
                         if let Ok(mut g) = state_p2.lock() {
-                            g.move_paddle(2, dir_val);
+                            g.set_paddle_direction(2, dir_val);
                         }
                     }
                 }

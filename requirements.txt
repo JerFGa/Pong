@@ -1,1 +1,2 @@
 -r pong_client/requirements.txt
+pygame-ce>=2.5.0

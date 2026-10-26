@@ -11,6 +11,8 @@ pub const WINNING_SCORE: u8 = 5;
 pub struct GameState {
     pub paddle1_y: f32,
     pub paddle2_y: f32,
+    pub paddle1_dir: i8, // -1 = arriba, 0 = quieto, 1 = abajo
+    pub paddle2_dir: i8, // -1 = arriba, 0 = quieto, 1 = abajo
     pub ball_x: f32,
     pub ball_y: f32,
     pub ball_vx: f32,
@@ -24,6 +26,8 @@ impl GameState {
         Self {
             paddle1_y: (COURT_HEIGHT - PADDLE_HEIGHT) / 2.0,
             paddle2_y: (COURT_HEIGHT - PADDLE_HEIGHT) / 2.0,
+            paddle1_dir: 0,
+            paddle2_dir: 0,
             ball_x: COURT_WIDTH / 2.0,
             ball_y: COURT_HEIGHT / 2.0,
             ball_vx: 5.0,
@@ -33,21 +37,28 @@ impl GameState {
         }
     }
 
-    pub fn move_paddle(&mut self, player_role: u8, direction: i8) {
-        let paddle = if player_role == 1 {
-            &mut self.paddle1_y
+    pub fn set_paddle_direction(&mut self, player_role: u8, direction: i8) {
+        if player_role == 1 {
+            self.paddle1_dir = direction;
         } else {
-            &mut self.paddle2_y
-        };
-
-        if direction < 0 {
-            *paddle = (*paddle - PADDLE_SPEED).max(0.0);
-        } else if direction > 0 {
-            *paddle = (*paddle + PADDLE_SPEED).min(COURT_HEIGHT - PADDLE_HEIGHT);
+            self.paddle2_dir = direction;
         }
     }
 
     pub fn update_physics(&mut self) -> Option<u8> {
+        // Mover paletas continuamente según la tecla presionada / mantenida
+        if self.paddle1_dir < 0 {
+            self.paddle1_y = (self.paddle1_y - PADDLE_SPEED).max(0.0);
+        } else if self.paddle1_dir > 0 {
+            self.paddle1_y = (self.paddle1_y + PADDLE_SPEED).min(COURT_HEIGHT - PADDLE_HEIGHT);
+        }
+
+        if self.paddle2_dir < 0 {
+            self.paddle2_y = (self.paddle2_y - PADDLE_SPEED).max(0.0);
+        } else if self.paddle2_dir > 0 {
+            self.paddle2_y = (self.paddle2_y + PADDLE_SPEED).min(COURT_HEIGHT - PADDLE_HEIGHT);
+        }
+
         self.ball_x += self.ball_vx;
         self.ball_y += self.ball_vy;
 
